@@ -1,17 +1,15 @@
-name: Auto Build Clash Verge Rev
+name: Build Clash Verge Rev
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
-  build:
+  build-windows:
+
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Node
@@ -22,17 +20,33 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install pnpm
+        run: npm install -g pnpm
+
       - name: Install dependencies
-        run: |
-          npm install -g pnpm
-          pnpm install
+        run: pnpm install
 
-      - name: Build
+      - name: Download Mihomo core
+        shell: powershell
         run: |
-          pnpm tauri build
+          mkdir src-tauri\sidecar
+          Invoke-WebRequest `
+          -Uri https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-windows-amd64.exe `
+          -OutFile src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
 
-      - name: Upload build
+      - name: Build application
+        run: pnpm tauri build
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-build
-          path: src-tauri/target/release
+          path: src-tauri/target/release/bundle
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: auto-build-${{ github.run_number }}
+          files: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
