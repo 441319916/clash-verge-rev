@@ -30,34 +30,44 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Create sidecar directory
-        run: mkdir src-tauri\sidecar
-
-      - name: Download Mihomo core & Create Alpha copy
-        # 这一步非常关键：下载核心后，复制一份命名为 alpha 解决 Tauri 找不到资源的报错
+      - name: Prepare sidecar and resources
+        shell: pwsh
         run: |
-          curl -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-windows-amd64.exe -o src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
-          cp src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe src-tauri\sidecar\verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
+          # 1. 创建必要的目录 (-Force 确保多次运行或目录已存在时不会报错)
+          New-Item -ItemType Directory -Force -Path src-tauri\sidecar
+          New-Item -ItemType Directory -Force -Path src-tauri\resources
+          
+          # 2. 下载并配置 Mihomo 核心 (使用 curl.exe 避免 PowerShell 内部别名冲突)
+          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-windows-amd64.exe -o src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
+          
+          # 复制出 alpha 版本以满足 tauri.conf.json 的打包需求
+          Copy-Item -Path src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe -Destination src-tauri\sidecar\verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
+          
+          # 3. 下载默认的 Geo 规则数据库到 resources 目录
+          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb -o src-tauri\resources\geoip.metadb
+          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat -o src-tauri\resources\geosite.dat
 
-      - name: Verify file
-        run: dir src-tauri\sidecar
+      - name: Verify files
+        shell: pwsh
+        run: |
+          Get-ChildItem src-tauri\sidecar
+          Get-ChildItem src-tauri\resources
 
       - name: Build application
-        # clash-verge-rev 官方通常有打包绿色版（zip）的命令，这里依然保留 Tauri build，但在后续步骤抓取免安装产物
         run: pnpm tauri build
 
       - name: Upload artifact (Portable)
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-portable
-          # 直接抓取 release 目录下的主程序（绿色版），而不是 bundle 里的安装包
-          path: src-tauri/target/release/clash-verge.exe
+          # 抓取单文件主程序和官方打包输出的绿色版 zip 文件
+          path: |
+            src-tauri/target/release/clash-verge.exe
+            src-tauri/target/release/bundle/**/*.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-build-${{ github.run_number }}
           files: |
-            # 如果官方的打包配置生成了免安装的 zip 文件，通常会在这个目录，一并抓取
-            src-tauri/target/release/bundle/**/*.zip
-            src-tauri/target/release/clash-verge.exe
+            src-ta
