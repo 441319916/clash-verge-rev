@@ -1,4 +1,4 @@
-name: Build Clash Verge Rev Portable
+name: Build Clash Verge Portable
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -31,42 +31,95 @@ jobs:
       - name: Prepare sidecar and resources
         shell: pwsh
         run: |
-          # 1. 创建必要的目录 (-Force 确保多次运行不会报错)
+          # 创建目录
           New-Item -ItemType Directory -Force -Path src-tauri\sidecar
           New-Item -ItemType Directory -Force -Path src-tauri\resources
-          
-          # 2. 下载并配置 Mihomo 核心
-          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-windows-amd64.exe -o src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
-          Copy-Item -Path src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe -Destination src-tauri\sidecar\verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
-          
-          # 3. 下载默认的 Geo 规则数据库到 resources 目录
-          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb -o src-tauri\resources\geoip.metadb
-          curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat -o src-tauri\resources\geosite.dat
+          New-Item -ItemType Directory -Force -Path src-tauri\config
+
+          # 下载最新 Mihomo 内核
+          Invoke-WebRequest -Uri https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-windows-amd64-v1.19.21.zip -OutFile src-tauri\sidecar\mihomo.zip
+          # 解压
+          Expand-Archive -Path src-tauri\sidecar\mihomo.zip -DestinationPath src-tauri\sidecar -Force
+          Remove-Item src-tauri\sidecar\mihomo.zip
+
+          # 重命名内核可执行文件
+          Rename-Item -Path src-tauri\sidecar\mihomo-windows-amd64.exe -NewName mihomo.exe
+
+          # 下载规则数据库
+          Invoke-WebRequest -Uri https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.metadb -OutFile src-tauri\resources\geoip.metadb
+          Invoke-WebRequest -Uri https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat -OutFile src-tauri\resources\geosite.dat
+
+          # 生成 config.yaml
+          @"
+mixed-port: 7897
+socks-port: 7898
+port: 7899
+log-level: info
+allow-lan: false
+ipv6: true
+mode: rule
+
+core_path: ../sidecar/mihomo.exe
+external-controller-pipe: \\.\pipe\verge-mihomo
+
+tun:
+  enable: false
+
+secret: ""
+
+external-controller-cors:
+  allow-private-network: true
+  allow-origins:
+    - tauri://localhost
+"@ | Out-File -Encoding UTF8 src-tauri\config\config.yaml
+
+          # 生成 start.bat
+          @"
+@echo off
+cd /d %~dp0
+:: 提升管理员权限
+net session >nul 2>&1
+if %errorLevel% NEQ 0 (
+    echo 正在以管理员权限重新启动...
+    powershell -Command ""Start-Process -FilePath '%~f0' -Verb RunAs""
+    exit /b
+)
+:: 启动 Clash Verge
+start "" src-tauri\target\release\clash-verge.exe --app-dir=src-tauri
+"@ | Out-File -Encoding ASCII src-tauri\start.bat
 
       - name: Verify files
         shell: pwsh
         run: |
           Get-ChildItem src-tauri\sidecar
           Get-ChildItem src-tauri\resources
+          Get-ChildItem src-tauri\config
+          Get-ChildItem src-tauri
 
       - name: Build application
-        # 允许安装包打包阶段失败，我们要的绿色版 exe 和 sidecar 在报错前就已经生成在 release 目录了
         continue-on-error: true
         run: pnpm tauri build
 
-      - name: Upload artifact (Portable)
+      - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-portable
-          # 提取主程序以及同目录下的内核边车程序
           path: |
-            src-tauri/target/release/clash-verge.exe
-            src-tauri/target/release/verge-mihomo*.exe
+            src-tauri\target\release\clash-verge.exe
+            src-tauri\sidecar\mihomo.exe
+            src-tauri\resources\geoip.metadb
+            src-tauri\resources\geosite.dat
+            src-tauri\config\config.yaml
+            src-tauri\start.bat
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-build-${{ github.run_number }}
           files: |
-            src-tauri/target/release/clash-verge.exe
-            src-tauri/target/release/verge-mihomo*.exe
+            src-tauri\target\release\clash-verge.exe
+            src-tauri\sidecar\mihomo.exe
+            src-tauri\resources\geoip.metadb
+            src-tauri\resources\geosite.dat
+            src-tauri\config\config.yaml
+            src-tauri\start.bat
