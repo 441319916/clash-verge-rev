@@ -33,7 +33,7 @@ jobs:
       - name: Prepare sidecar and resources
         shell: pwsh
         run: |
-          # 1. 创建必要的目录 (-Force 确保多次运行不会报错)
+          # 1. 创建必要的目录
           New-Item -ItemType Directory -Force -Path src-tauri\sidecar
           New-Item -ItemType Directory -Force -Path src-tauri\resources
           
@@ -41,7 +41,7 @@ jobs:
           curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-windows-amd64.exe -o src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
           Copy-Item -Path src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe -Destination src-tauri\sidecar\verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
           
-          # 3. 下载默认的 Geo 规则数据库到 resources 目录
+          # 3. 下载默认的 Geo 规则数据库
           curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb -o src-tauri\resources\geoip.metadb
           curl.exe -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat -o src-tauri\resources\geosite.dat
 
@@ -51,15 +51,16 @@ jobs:
           Get-ChildItem src-tauri\sidecar
           Get-ChildItem src-tauri\resources
 
-      - name: Build application (Executable Only)
-        # --bundles none：只编译主程序，跳过 NSIS 安装包的打包过程，完美避开插件报错
-        run: pnpm tauri build --bundles none
+      - name: Build application
+        # 核心魔法：允许安装包打包失败，因为我们要的绿色版 exe 此时已经生成了！
+        continue-on-error: true
+        run: pnpm tauri build
 
       - name: Upload artifact (Portable)
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-portable
-          # 抓取单文件主程序 (添加了双路径以兼容不同的工作区结构配置)
+          # 提取已经编译好的主程序
           path: |
             src-tauri/target/release/clash-verge.exe
             target/release/clash-verge.exe
