@@ -1,4 +1,4 @@
-name: Build Clash Verge Rev
+name: Build Clash Verge Rev Portable
 
 on:
   workflow_dispatch:
@@ -10,11 +10,9 @@ permissions:
 
 jobs:
   build:
-
     runs-on: windows-latest
 
     steps:
-
       - name: Checkout source
         uses: actions/checkout@v4
 
@@ -35,26 +33,31 @@ jobs:
       - name: Create sidecar directory
         run: mkdir src-tauri\sidecar
 
-      - name: Download Mihomo core
+      - name: Download Mihomo core & Create Alpha copy
+        # 这一步非常关键：下载核心后，复制一份命名为 alpha 解决 Tauri 找不到资源的报错
         run: |
           curl -L --retry 5 --retry-delay 5 https://github.com/MetaCubeX/mihomo/releases/download/v1.18.3/mihomo-windows-amd64.exe -o src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe
+          cp src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe src-tauri\sidecar\verge-mihomo-alpha-x86_64-pc-windows-msvc.exe
 
       - name: Verify file
         run: dir src-tauri\sidecar
 
       - name: Build application
+        # clash-verge-rev 官方通常有打包绿色版（zip）的命令，这里依然保留 Tauri build，但在后续步骤抓取免安装产物
         run: pnpm tauri build
 
-      - name: Upload artifact
+      - name: Upload artifact (Portable)
         uses: actions/upload-artifact@v4
         with:
-          name: clash-verge-build
-          path: src-tauri/target/release/bundle
+          name: clash-verge-portable
+          # 直接抓取 release 目录下的主程序（绿色版），而不是 bundle 里的安装包
+          path: src-tauri/target/release/clash-verge.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-build-${{ github.run_number }}
           files: |
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.msi
+            # 如果官方的打包配置生成了免安装的 zip 文件，通常会在这个目录，一并抓取
+            src-tauri/target/release/bundle/**/*.zip
+            src-tauri/target/release/clash-verge.exe
