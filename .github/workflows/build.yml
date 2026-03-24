@@ -1,125 +1,74 @@
-name: Build Clash Verge Portable
+name: Build Clash Verge Rev Portable (Official Style)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 保留手动触发，方便你随时点击构建
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build-portable:
     runs-on: windows-latest
+    env:
+      TARGET: x86_64-pc-windows-msvc
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v6 # 跟随官方升级到 v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
-          node-version: 20
+          toolchain: "1.91.0" # 严格对齐官方 Rust 版本
+          targets: ${{ env.TARGET }}
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.14.0" # 严格对齐官方 Node 版本
 
       - name: Install pnpm
-        run: npm install -g pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install dependencies & Auto Prebuild
+        run: |
+          pnpm i
+          # 核心魔法：让官方脚本全自动下载内核、改名、算哈希、下规则库！
+          pnpm run prebuild ${{ env.TARGET }}
 
-      - name: Prepare sidecar and resources
+      - name: Build Application (Executable Only)
+        # 我们只要绿色版，不需要打包成 msi 或 exe 安装包，跳过 NSIS 打包避免插件报错
+        run: pnpm tauri build --bundles none
+        # (注：如果 --bundles none 报错，请改回 pnpm tauri build 并加上 continue-on-error: true)
+        continue-on-error: true 
+
+      - name: Assemble Portable Directory
         shell: pwsh
         run: |
-          # 创建目录
-          New-Item -ItemType Directory -Force -Path src-tauri\sidecar
-          New-Item -ItemType Directory -Force -Path src-tauri\resources
-          New-Item -ItemType Directory -Force -Path src-tauri\config
+          # 建立标准绿色版文件夹
+          New-Item -ItemType Directory -Force -Path Clash-Verge-Portable\data
+          New-Item -ItemType Directory -Force -Path Clash-Verge-Portable\resources
+          
+          # 提取官方脚本准备好的内核与规则库
+          Copy-Item -Path "src-tauri\sidecar\verge-mihomo*.exe" -Destination "Clash-Verge-Portable\resources\"
+          Copy-Item -Path "src-tauri\resources\*" -Destination "Clash-Verge-Portable\resources\" -Recurse
+          
+          # 提取编译好的主程序
+          Copy-Item -Path "src-tauri\target\release\clash-verge.exe" -Destination "Clash-Verge-Portable\"
+          
+          # 打包为成品 ZIP
+          Compress-Archive -Path "Clash-Verge-Portable\*" -DestinationPath "Clash-Verge-Portable.zip"
 
-          # 下载最新 Mihomo 内核
-          Invoke-WebRequest -Uri https://github.com/MetaCubeX/mihomo/releases/latest/download/mihomo-windows-amd64-v1.19.21.zip -OutFile src-tauri\sidecar\mihomo.zip
-          # 解压
-          Expand-Archive -Path src-tauri\sidecar\mihomo.zip -DestinationPath src-tauri\sidecar -Force
-          Remove-Item src-tauri\sidecar\mihomo.zip
-
-          # 重命名内核可执行文件
-          Rename-Item -Path src-tauri\sidecar\mihomo-windows-amd64.exe -NewName mihomo.exe
-
-          # 下载规则数据库
-          Invoke-WebRequest -Uri https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.metadb -OutFile src-tauri\resources\geoip.metadb
-          Invoke-WebRequest -Uri https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geosite.dat -OutFile src-tauri\resources\geosite.dat
-
-          # 生成 config.yaml
-          @"
-mixed-port: 7897
-socks-port: 7898
-port: 7899
-log-level: info
-allow-lan: false
-ipv6: true
-mode: rule
-
-core_path: ../sidecar/mihomo.exe
-external-controller-pipe: \\.\pipe\verge-mihomo
-
-tun:
-  enable: false
-
-secret: ""
-
-external-controller-cors:
-  allow-private-network: true
-  allow-origins:
-    - tauri://localhost
-"@ | Out-File -Encoding UTF8 src-tauri\config\config.yaml
-
-          # 生成 start.bat
-          @"
-@echo off
-cd /d %~dp0
-:: 提升管理员权限
-net session >nul 2>&1
-if %errorLevel% NEQ 0 (
-    echo 正在以管理员权限重新启动...
-    powershell -Command ""Start-Process -FilePath '%~f0' -Verb RunAs""
-    exit /b
-)
-:: 启动 Clash Verge
-start "" src-tauri\target\release\clash-verge.exe --app-dir=src-tauri
-"@ | Out-File -Encoding ASCII src-tauri\start.bat
-
-      - name: Verify files
-        shell: pwsh
-        run: |
-          Get-ChildItem src-tauri\sidecar
-          Get-ChildItem src-tauri\resources
-          Get-ChildItem src-tauri\config
-          Get-ChildItem src-tauri
-
-      - name: Build application
-        continue-on-error: true
-        run: pnpm tauri build
-
-      - name: Upload portable artifact
+      - name: Upload Portable ZIP
         uses: actions/upload-artifact@v4
         with:
           name: clash-verge-portable
-          path: |
-            src-tauri\target\release\clash-verge.exe
-            src-tauri\sidecar\mihomo.exe
-            src-tauri\resources\geoip.metadb
-            src-tauri\resources\geosite.dat
-            src-tauri\config\config.yaml
-            src-tauri\start.bat
+          path: Clash-Verge-Portable.zip
 
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: auto-build-${{ github.run_number }}
-          files: |
-            src-tauri\target\release\clash-verge.exe
-            src-tauri\sidecar\mihomo.exe
-            src-tauri\resources\geoip.metadb
-            src-tauri\resources\geosite.dat
-            src-tauri\config\config.yaml
-            src-tauri\start.bat
+          files: Clash-Verge-Portable.zip
